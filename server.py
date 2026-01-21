@@ -1,12 +1,9 @@
 """
 Gemini AI MCP Server for Cloud Run
 FastAPI + MCP integration for Cloud Run compatibility
-Version 2.0 - With Image Generation Support (Free Tier)
 """
 
 import asyncio
-import base64
-import json
 import logging
 import os
 from typing import Optional
@@ -45,8 +42,6 @@ mcp = FastMCP(
     - gemini_translate: Translate text between languages
     - gemini_analyze: Analyze and answer questions about text
     - gemini_code_review: Review and improve code
-    - gemini_generate_image: Generate images from text prompts (Free tier: 500/day)
-    - gemini_edit_image: Edit existing images with instructions
     """
 )
 
@@ -151,38 +146,6 @@ class CodeReviewInput(BaseModel):
     )
 
 
-class ImageGenerateInput(BaseModel):
-    """이미지 생성 입력 모델"""
-    prompt: str = Field(
-        ...,
-        description="생성할 이미지에 대한 설명 (예: '우주복을 입은 고양이', 'a sunset over mountains')",
-        min_length=1,
-        max_length=2000
-    )
-    style: str = Field(
-        default="auto",
-        description="이미지 스타일: 'auto', 'photo' (사진), 'illustration' (일러스트), 'anime' (애니메), 'painting' (그림), '3d' (3D 렌더링)"
-    )
-    quality: str = Field(
-        default="standard",
-        description="이미지 품질: 'standard' (표준), 'hd' (고품질)"
-    )
-
-
-class ImageEditInput(BaseModel):
-    """이미지 편집 입력 모델"""
-    image_base64: str = Field(
-        ...,
-        description="편집할 이미지의 Base64 인코딩 데이터 (PNG/JPEG)"
-    )
-    instruction: str = Field(
-        ...,
-        description="편집 지시사항 (예: '배경을 파란색으로 변경', '안경 제거')",
-        min_length=1,
-        max_length=1000
-    )
-
-
 # ============================================================
 # Gemini API 헬퍼 함수
 # ============================================================
@@ -221,175 +184,8 @@ async def generate_content(
         raise
 
 
-async def generate_image(
-    prompt: str,
-    style: str = "auto",
-    quality: str = "standard"
-) -> dict:
-    """
-    Gemini API를 사용하여 이미지 생성 (무료 티어)
-    모델: gemini-2.0-flash-exp (이미지 생성 지원)
-    """
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-    
-    # 스타일 프롬프트 매핑
-    style_prompts = {
-        "photo": "A high-quality photograph of",
-        "illustration": "A digital illustration of",
-        "anime": "An anime-style illustration of",
-        "painting": "An oil painting of",
-        "3d": "A 3D rendered image of",
-        "auto": ""
-    }
-    
-    style_prefix = style_prompts.get(style, "")
-    
-    # 품질 프롬프트 추가
-    quality_suffix = ", highly detailed, 4K resolution" if quality == "hd" else ""
-    
-    # 최종 프롬프트 구성
-    if style_prefix:
-        full_prompt = f"{style_prefix} {prompt}{quality_suffix}"
-    else:
-        full_prompt = f"{prompt}{quality_suffix}"
-    
-    try:
-        # 이미지 생성을 위한 모델 (무료 티어 지원)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        
-        # 이미지 생성 요청
-        response = await asyncio.to_thread(
-            model.generate_content,
-            [f"Generate an image: {full_prompt}"],
-            generation_config=genai.GenerationConfig(
-                response_mime_type="text/plain"
-            )
-        )
-        
-        result = {
-            "success": False,
-            "image_base64": None,
-            "mime_type": None,
-            "text_response": None,
-            "prompt_used": full_prompt,
-            "message": ""
-        }
-        
-        # 응답 처리
-        if response.candidates:
-            for part in response.candidates[0].content.parts:
-                # 텍스트 응답
-                if hasattr(part, 'text') and part.text:
-                    result["text_response"] = part.text
-                # 이미지 응답
-                if hasattr(part, 'inline_data') and part.inline_data:
-                    image_data = part.inline_data
-                    result["image_base64"] = base64.b64encode(image_data.data).decode('utf-8')
-                    result["mime_type"] = image_data.mime_type
-                    result["success"] = True
-        
-        if result["success"]:
-            result["message"] = "이미지가 성공적으로 생성되었습니다."
-        else:
-            # 이미지가 생성되지 않은 경우 텍스트 응답 반환
-            result["message"] = "이미지 생성이 지원되지 않는 프롬프트이거나, 텍스트 응답만 생성되었습니다."
-            if result["text_response"]:
-                result["message"] += f" 응답: {result['text_response'][:200]}"
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"이미지 생성 오류: {e}")
-        return {
-            "success": False,
-            "image_base64": None,
-            "mime_type": None,
-            "text_response": None,
-            "prompt_used": full_prompt,
-            "message": f"이미지 생성 오류: {str(e)}"
-        }
-
-
-async def edit_image(
-    image_base64: str,
-    instruction: str
-) -> dict:
-    """
-    Gemini API를 사용하여 이미지 편집
-    """
-    if not GEMINI_API_KEY:
-        raise ValueError("GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.")
-    
-    try:
-        # Base64 디코딩
-        image_data = base64.b64decode(image_base64)
-        
-        # 이미지 MIME 타입 감지 (간단한 매직 바이트 확인)
-        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
-            mime_type = "image/png"
-        elif image_data[:2] == b'\xff\xd8':
-            mime_type = "image/jpeg"
-        else:
-            mime_type = "image/png"  # 기본값
-        
-        # 모델 준비
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
-        
-        # 이미지와 지시사항을 함께 전송
-        response = await asyncio.to_thread(
-            model.generate_content,
-            [
-                {
-                    "mime_type": mime_type,
-                    "data": image_data
-                },
-                f"Edit this image: {instruction}. Return the edited image."
-            ]
-        )
-        
-        result = {
-            "success": False,
-            "image_base64": None,
-            "mime_type": None,
-            "text_response": None,
-            "instruction": instruction,
-            "message": ""
-        }
-        
-        # 응답 처리
-        if response.candidates:
-            for part in response.candidates[0].content.parts:
-                if hasattr(part, 'text') and part.text:
-                    result["text_response"] = part.text
-                if hasattr(part, 'inline_data') and part.inline_data:
-                    result["image_base64"] = base64.b64encode(part.inline_data.data).decode('utf-8')
-                    result["mime_type"] = part.inline_data.mime_type
-                    result["success"] = True
-        
-        if result["success"]:
-            result["message"] = "이미지가 성공적으로 편집되었습니다."
-        else:
-            result["message"] = "이미지 편집 결과를 생성할 수 없습니다."
-            if result["text_response"]:
-                result["message"] += f" 응답: {result['text_response'][:200]}"
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"이미지 편집 오류: {e}")
-        return {
-            "success": False,
-            "image_base64": None,
-            "mime_type": None,
-            "text_response": None,
-            "instruction": instruction,
-            "message": f"이미지 편집 오류: {str(e)}"
-        }
-
-
 # ============================================================
-# MCP 도구 정의 - 텍스트 도구
+# MCP 도구 정의
 # ============================================================
 
 @mcp.tool(
@@ -411,6 +207,16 @@ async def gemini_generate(params: GenerateInput) -> str:
     - 코드 생성
     - 아이디어 브레인스토밍
     - 질문 답변
+    
+    Args:
+        params: GenerateInput - 생성 설정
+            - prompt: 생성할 내용에 대한 프롬프트
+            - model: 사용할 모델 (기본: gemini-2.0-flash)
+            - max_tokens: 최대 토큰 수 (기본: 2048)
+            - temperature: 창의성 (0.0-1.0, 기본: 0.7)
+    
+    Returns:
+        str: 생성된 텍스트
     """
     logger.info(f">>> 🛠️ Tool: 'gemini_generate' called with prompt length: {len(params.prompt)}")
     
@@ -437,6 +243,15 @@ async def gemini_generate(params: GenerateInput) -> str:
 async def gemini_summarize(params: SummarizeInput) -> str:
     """
     Gemini AI를 사용하여 텍스트를 요약합니다.
+    
+    Args:
+        params: SummarizeInput - 요약 설정
+            - text: 요약할 텍스트
+            - style: 요약 스타일 (concise/detailed/bullet_points)
+            - language: 출력 언어
+    
+    Returns:
+        str: 요약된 텍스트
     """
     logger.info(f">>> 🛠️ Tool: 'gemini_summarize' called with text length: {len(params.text)}")
     
@@ -481,6 +296,15 @@ async def gemini_summarize(params: SummarizeInput) -> str:
 async def gemini_translate(params: TranslateInput) -> str:
     """
     Gemini AI를 사용하여 텍스트를 번역합니다.
+    
+    Args:
+        params: TranslateInput - 번역 설정
+            - text: 번역할 텍스트
+            - source_language: 원본 언어 (auto=자동 감지)
+            - target_language: 대상 언어
+    
+    Returns:
+        str: 번역된 텍스트
     """
     logger.info(f">>> 🛠️ Tool: 'gemini_translate' called: {params.source_language} -> {params.target_language}")
     
@@ -530,6 +354,14 @@ async def gemini_translate(params: TranslateInput) -> str:
 async def gemini_analyze(params: AnalyzeInput) -> str:
     """
     Gemini AI를 사용하여 텍스트를 분석하고 질문에 답변합니다.
+    
+    Args:
+        params: AnalyzeInput - 분석 설정
+            - text: 분석할 텍스트/문서
+            - question: 질문
+    
+    Returns:
+        str: 질문에 대한 답변
     """
     logger.info(f">>> 🛠️ Tool: 'gemini_analyze' called with question: {params.question[:50]}...")
     
@@ -561,6 +393,15 @@ async def gemini_analyze(params: AnalyzeInput) -> str:
 async def gemini_code_review(params: CodeReviewInput) -> str:
     """
     Gemini AI를 사용하여 코드를 리뷰합니다.
+    
+    Args:
+        params: CodeReviewInput - 코드 리뷰 설정
+            - code: 리뷰할 코드
+            - language: 프로그래밍 언어
+            - focus: 리뷰 초점 (all/security/performance/readability)
+    
+    Returns:
+        str: 코드 리뷰 결과
     """
     logger.info(f">>> 🛠️ Tool: 'gemini_code_review' called with focus: {params.focus}")
     
@@ -600,97 +441,13 @@ async def gemini_code_review(params: CodeReviewInput) -> str:
 
 
 # ============================================================
-# MCP 도구 정의 - 이미지 도구 (NEW)
-# ============================================================
-
-@mcp.tool(
-    name="gemini_generate_image",
-    annotations={
-        "title": "이미지 생성 (무료 티어)",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True
-    }
-)
-async def gemini_generate_image(params: ImageGenerateInput) -> str:
-    """
-    Gemini AI를 사용하여 텍스트 프롬프트로 이미지를 생성합니다.
-    
-    무료 티어에서 하루 약 500장까지 생성 가능합니다.
-    
-    Args:
-        params: ImageGenerateInput - 이미지 생성 설정
-            - prompt: 생성할 이미지 설명 (예: '우주복을 입은 고양이')
-            - style: 이미지 스타일 (auto/photo/illustration/anime/painting/3d)
-            - quality: 이미지 품질 (standard/hd)
-    
-    Returns:
-        JSON 형식의 결과:
-        - success: 성공 여부
-        - image_base64: Base64 인코딩된 이미지 데이터
-        - mime_type: 이미지 MIME 타입
-        - message: 결과 메시지
-        
-    Note:
-        반환된 image_base64는 HTML에서 다음과 같이 사용:
-        <img src="data:{mime_type};base64,{image_base64}">
-    """
-    logger.info(f">>> 🖼️ Tool: 'gemini_generate_image' called with prompt: {params.prompt[:50]}...")
-    
-    result = await generate_image(
-        prompt=params.prompt,
-        style=params.style,
-        quality=params.quality
-    )
-    
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-@mcp.tool(
-    name="gemini_edit_image",
-    annotations={
-        "title": "이미지 편집",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": True
-    }
-)
-async def gemini_edit_image(params: ImageEditInput) -> str:
-    """
-    Gemini AI를 사용하여 기존 이미지를 편집합니다.
-    
-    Args:
-        params: ImageEditInput - 이미지 편집 설정
-            - image_base64: 편집할 이미지의 Base64 데이터
-            - instruction: 편집 지시사항 (예: '배경을 파란색으로 변경')
-    
-    Returns:
-        JSON 형식의 결과:
-        - success: 성공 여부
-        - image_base64: Base64 인코딩된 편집된 이미지
-        - mime_type: 이미지 MIME 타입
-        - message: 결과 메시지
-    """
-    logger.info(f">>> 🖼️ Tool: 'gemini_edit_image' called with instruction: {params.instruction[:50]}...")
-    
-    result = await edit_image(
-        image_base64=params.image_base64,
-        instruction=params.instruction
-    )
-    
-    return json.dumps(result, ensure_ascii=False, indent=2)
-
-
-# ============================================================
 # 헬스 체크용 리소스
 # ============================================================
 
 @mcp.resource("health://status")
 def health_status() -> str:
     """서버 상태 확인"""
-    return "OK - Gemini MCP Server is running (v2.0 with Image Generation)"
+    return "OK - Gemini MCP Server is running"
 
 
 # ============================================================
@@ -700,7 +457,7 @@ def health_status() -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan for MCP setup"""
-    logger.info("🚀 Starting Gemini MCP Server v2.0 with Image Generation...")
+    logger.info("🚀 Starting Gemini MCP Server...")
     yield
     logger.info("👋 Shutting down Gemini MCP Server...")
 
@@ -708,8 +465,8 @@ async def lifespan(app: FastAPI):
 # FastAPI 앱 생성
 app = FastAPI(
     title="Gemini MCP Server",
-    description="Gemini AI MCP Server for Cloud Run with Image Generation",
-    version="2.0.0",
+    description="Gemini AI MCP Server for Cloud Run",
+    version="1.0.0",
     lifespan=lifespan
 )
 
@@ -718,12 +475,7 @@ app = FastAPI(
 @app.get("/")
 async def root():
     """Root health check endpoint"""
-    return {
-        "status": "ok",
-        "service": "gemini-mcp-server",
-        "version": "2.0.0",
-        "features": ["text-generation", "image-generation", "image-editing"]
-    }
+    return {"status": "ok", "service": "gemini-mcp-server"}
 
 
 @app.get("/health")
@@ -731,21 +483,12 @@ async def health():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "gemini_configured": GEMINI_API_KEY is not None,
-        "version": "2.0.0",
-        "tools": [
-            "gemini_generate",
-            "gemini_summarize", 
-            "gemini_translate",
-            "gemini_analyze",
-            "gemini_code_review",
-            "gemini_generate_image",
-            "gemini_edit_image"
-        ]
+        "gemini_configured": GEMINI_API_KEY is not None
     }
 
 
 # MCP SSE 앱 마운트
+# FastMCP의 sse_app() 메서드로 SSE 엔드포인트 생성
 app.mount("/mcp", mcp.sse_app())
 
 
