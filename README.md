@@ -17,7 +17,7 @@ Google Cloud Run에서 실행되는 Gemini AI 연동 MCP (Model Context Protocol
 Cloud Run 서비스에 다음 환경 변수를 설정하세요:
 
 ```
-GEMINI_API_KEY=your-gemini-api-key
+GEMINI_API_KEY=AIzaSyAJnM6qiyfkm0UhmFa3s08-Fy0v5LWc_uw
 ```
 
 ### Cloud Run 배포
