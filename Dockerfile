@@ -1,18 +1,20 @@
-# 1. 파이썬 기본 이미지 설정 (가볍고 안정적인 버전)
+# 1. 파이썬 버전 (3.10)
 FROM python:3.10-slim
 
-# 2. 컨테이너 내 작업 폴더 설정
+# 2. 로그가 버퍼링 없이 즉시 출력되도록 설정 (로그 확인에 필수!)
+ENV PYTHONUNBUFFERED=1
+
+# 3. 작업 폴더
 WORKDIR /app
 
-# =====================================================================
-# [핵심 수정] requirements.txt 파일을 복사하지 않고 직접 설치합니다.
-# 이 방식을 쓰면 requirements.txt 파일이 있든 없든 상관없이 빌드가 성공합니다.
-# =====================================================================
+# 4. 필수 라이브러리 설치
+# (팁: mcp 라이브러리가 최신인지 확인하기 위해 업그레이드 옵션을 붙입니다)
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir fastapi "uvicorn[standard]" mcp google-generativeai
 
-# 3. 나머지 소스 코드 복사
+# 5. 소스 코드 복사
 COPY . .
 
-# 4. 서버 실행 명령어 설정 (Cloud Run은 기본 8080 포트 사용)
-# main.py 파일 안에 app 객체가 있다고 가정합니다.
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# 6. 서버 실행
+# --workers 1 옵션을 추가해서 가볍게 실행합니다.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
