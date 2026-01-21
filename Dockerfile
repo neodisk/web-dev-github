@@ -5,8 +5,8 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # 3. 필요한 파일 복사 (requirements.txt가 있다면)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# COPY requirements.txt .
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]"  # FastAPI와 Uvicorn 설치
 
 # 4. 소스 코드 전체 복사
 COPY . .
