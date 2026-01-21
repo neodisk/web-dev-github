@@ -8,7 +8,7 @@ WORKDIR /app
 # [핵심 수정] requirements.txt 파일을 복사하지 않고 직접 설치합니다.
 # 이 방식을 쓰면 requirements.txt 파일이 있든 없든 상관없이 빌드가 성공합니다.
 # =====================================================================
-RUN pip install --no-cache-dir fastapi "uvicorn[standard]"
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]" mcp
 
 # 3. 나머지 소스 코드 복사
 COPY . .
