@@ -2,7 +2,6 @@
 name = "mcp-server-gemini"
 version = "1.0.0"
 description = "Gemini AI MCP Server for Cloud Run"
-readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=1.8.0",
