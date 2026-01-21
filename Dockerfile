@@ -22,5 +22,5 @@ RUN uv sync
 # Cloud Run은 PORT 환경변수를 자동 설정
 EXPOSE $PORT
 
-# MCP 서버 실행
-CMD ["uv", "run", "server.py"]
+# uvicorn으로 FastAPI 앱 실행
+CMD ["uv", "run", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,16 +1,20 @@
 """
 Gemini AI MCP Server for Cloud Run
-Streamable HTTP transport를 사용한 원격 MCP 서버
+FastAPI + MCP integration for Cloud Run compatibility
 """
 
 import asyncio
 import logging
 import os
 from typing import Optional
+from contextlib import asynccontextmanager
 
-from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 import google.generativeai as genai
+
+# MCP imports
+from mcp.server.fastmcp import FastMCP
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -447,18 +451,60 @@ def health_status() -> str:
 
 
 # ============================================================
+# FastAPI 앱 설정
+# ============================================================
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI lifespan for MCP setup"""
+    logger.info("🚀 Starting Gemini MCP Server...")
+    yield
+    logger.info("👋 Shutting down Gemini MCP Server...")
+
+
+# FastAPI 앱 생성
+app = FastAPI(
+    title="Gemini MCP Server",
+    description="Gemini AI MCP Server for Cloud Run",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+
+# Health check 엔드포인트 (Cloud Run용)
+@app.get("/")
+async def root():
+    """Root health check endpoint"""
+    return {"status": "ok", "service": "gemini-mcp-server"}
+
+
+@app.get("/health")
+async def health():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "gemini_configured": GEMINI_API_KEY is not None
+    }
+
+
+# MCP SSE 앱 마운트
+# FastMCP의 sse_app() 메서드로 SSE 엔드포인트 생성
+app.mount("/mcp", mcp.sse_app())
+
+
+# ============================================================
 # 서버 실행
 # ============================================================
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8080))
-    logger.info(f"🚀 MCP server starting on port {port}")
+    import uvicorn
     
-    # Cloud Run을 위한 Streamable HTTP transport
-    asyncio.run(
-        mcp.run_async(
-            transport="streamable-http",
-            host="0.0.0.0",
-            port=port,
-        )
+    port = int(os.getenv("PORT", 8080))
+    logger.info(f"🚀 Starting server on port {port}")
+    
+    uvicorn.run(
+        "server:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
     )
